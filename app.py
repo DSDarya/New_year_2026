@@ -12,6 +12,9 @@ DEFAULT_PARTICIPANTS = [
     "Рома", "Настя", "Вика", "Алексей", "Даниил", "Инна"
 ]
 
+# --- ADMIN CONFIG ---
+ADMIN_USER = "Даша К"  # Единственный пользователь с доступом к админке
+
 # --- PERSISTENT STORAGE FUNCTIONS ---
 def load_data():
     """Загружает данные из session_state или создает новые"""
@@ -133,6 +136,7 @@ st.markdown(
       .card { background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.75)); padding:18px; border-radius:16px; box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
       .small { font-size:14px; color:#333; }
       .btn { background: linear-gradient(90deg,#ff9a9e,#fad0c4); border: none; padding: 10px 18px; border-radius: 12px; }
+      .admin-section { border: 2px solid #ff6b6b; border-radius: 10px; padding: 15px; background: rgba(255, 107, 107, 0.1); }
     </style>
     """,
     unsafe_allow_html=True
@@ -159,23 +163,61 @@ with col2:
 
 st.markdown("---")
 
-# --- ADMIN SECTION ---
-with st.expander("Администрирование (для организатора)"):
+# --- ADMIN SECTION (ONLY FOR Даша К) ---
+def show_admin_section():
+    """Показывает админ-панель только для Даши К"""
+    st.markdown('<div class="admin-section">', unsafe_allow_html=True)
+    st.markdown("### 🔧 Панель организатора")
+    
     st.write("**Текущее состояние:**")
     st.write(f"Осталось участников: {len(remaining)}")
     st.write(f"Уже выбрали: {len(assigned)}")
     
-    if st.button("🔄 Сбросить игру", type="secondary"):
-        reset_game()
-        st.success("Игра сброшена!")
+    col1, col2 = st.columns(2)
     
-    if st.button("📊 Показать все назначения", type="secondary"):
-        if assigned:
-            st.write("**Все назначения:**")
-            for santa, recipient in assigned.items():
-                st.write(f"🎅 {santa} → 🎁 {recipient}")
-        else:
-            st.info("Назначений пока нет")
+    with col1:
+        if st.button("🔄 Полный сброс игры", type="secondary", use_container_width=True):
+            reset_game()
+            st.success("Игра полностью сброшена!")
+    
+    with col2:
+        if st.button("📊 Показать все назначения", type="secondary", use_container_width=True):
+            if assigned:
+                st.write("**Все назначения:**")
+                for santa, recipient in assigned.items():
+                    st.write(f"🎅 {santa} → 🎁 {recipient}")
+            else:
+                st.info("Назначений пока нет")
+    
+    # Расширенная информация
+    if assigned:
+        st.write("**Детальная информация:**")
+        assigned_users = list(assigned.keys())
+        remaining_users = remaining.copy()
+        
+        col_info1, col_info2 = st.columns(2)
+        with col_info1:
+            st.write("**Выбрали получателей:**")
+            for user in assigned_users:
+                st.write(f"• {user}")
+        
+        with col_info2:
+            st.write("**Еще не выбрали:**")
+            for user in remaining_users:
+                st.write(f"• {user}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Проверяем, является ли текущий пользователь админом
+is_admin = st.session_state.current_user == ADMIN_USER
+
+if is_admin:
+    show_admin_section()
+else:
+    # Показываем минимальную информацию о статусе для всех пользователей
+    st.markdown(f"**Статус:** {len(assigned)} из {len(DEFAULT_PARTICIPANTS)} участников уже выбрали получателей")
+
+st.markdown("---")
 
 # --- AUTH MODE ---
 st.markdown("### Вариант авторизации")
@@ -243,8 +285,11 @@ if st.session_state.current_user:
     col_a, col_b = st.columns([2,1])
     with col_a:
         st.markdown("Вы можете получить имя вашего получателя **только один раз**. После выдачи это имя удаляется из общего пуала.")
+    
     with col_b:
         st.markdown(f"**Осталось участников:** {len(remaining)}")
+        if is_admin:
+            st.markdown("👑 **Вы организатор**")
 
     # Проверяем, не выбрал ли уже этот пользователь
     if user in assigned:
@@ -295,3 +340,10 @@ with col3:
 
 if not remaining and assigned:
     st.success("🎄 Все участники получили своих получателей! Тайный Санта завершен!")
+
+# --- SECRET ADMIN ACCESS FOR Даша К (даже если она уже выбрала) ---
+if st.session_state.current_user and st.session_state.current_user == ADMIN_USER and st.session_state.current_user in assigned:
+    st.markdown("---")
+    with st.expander("🔒 Секретный доступ организатора"):
+        st.info("Вы уже выбрали получателя, но как организатор можете видеть админ-функции")
+        show_admin_section()
