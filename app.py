@@ -110,7 +110,7 @@ st.markdown(
 html(SNOW_HTML, height=0)
 
 # --- HEADER ---
-st.markdown('<div class="app-title">🎄 Тайный Санта — Streamlit Edition 🎁</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-title">🎄 Тайный Санта — хо-хо-хо🎁</div>', unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
 col1, col2 = st.columns([1,2])
@@ -121,7 +121,6 @@ with col2:
     **Как работает**
     - Вы выбираете своё имя в форме авторизации.
     - Нажимаете кнопку — и вам случайно выдаётся получатель.
-    - После выдачи имя получателя удаляется из общего пула: никто больше не сможет его получить.
     """)
 
 st.markdown("---")
@@ -193,65 +192,9 @@ if st.session_state.current_user:
         st.success(f"Ваш получатель: **{st.session_state.assigned[user]}** 🎁✨")
 
     # Optional: show small hint
-    with st.expander("Информация для организатора (скрыто)"):
-        st.write("Assigned mapping:", st.session_state.assigned)
-        st.write("Remaining pool:", st.session_state.remaining)
 
 else:
     st.info("Пожалуйста, авторизуйтесь, чтобы получить имя получателя.")
 
 st.markdown("---")
 
-# --- DEPLOY GUIDE (Streamlit Cloud) ---
-with st.expander("Deploy guide — Streamlit Cloud / Быстрый гайд для деплоя"):
-    st.markdown("""
-    **Минимальные шаги для деплоя на Streamlit Cloud:**
-
-    1. Создайте публичный или приватный репозиторий на GitHub и поместите в него этот скрипт (например, `app.py`).
-    2. Добавьте файл `requirements.txt` рядом с `app.py` со следующими строками:
-       ```
-       streamlit>=1.0
-       ```
-    3. (Опционально) добавьте `packages.txt` если нужны системные зависимости — обычно не требуется.
-    4. Перейдите на https://streamlit.io/cloud и войдите через GitHub (или откройте Streamlit Community Cloud).
-    5. Нажмите **New app**, выберите репозиторий и ветку, укажите путь к `app.py` и нажмите Deploy.
-    6. После успешного деплоя вы получите публичную ссылку на приложение.
-
-    **Советы и расширения:**
-    - Для приватности списка участников используйте загруженный секретный файл или переменные окружения, а не храните имена прямо в коде.
-    - Если хотите хранить состояние (assigned/remaining) между перезапусками, подключите небольшую базу данных (SQLite, Google Sheets, Airtable) или используйте Streamlit Secrets + GitHub Actions.
-    - Если требуется строгая авторизация, добавьте OAuth (GitHub/Google) через сторонние библиотеки и проверяйте email перед выдачей имён.
-
-    **Docker (локальный деплой)**
-
-    Dockerfile минимальный пример:
-    ```dockerfile
-    FROM python:3.11-slim
-    WORKDIR /app
-    COPY . /app
-    RUN pip install --no-cache-dir -r requirements.txt
-    EXPOSE 8501
-    CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
-    ```
-
-    **Запуск локально:**
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate   # или .venv\Scripts\activate на Windows
-    pip install -r requirements.txt
-    streamlit run app.py
-    ```
-
-    """)
-
-# --- FOOTER ---
-st.markdown("<div style='text-align:center; padding:12px; font-size:12px; color:#444;'>Счастливого Нового года! 🎉</div>", unsafe_allow_html=True)
-
-# --- END ---
-
-# -----------------------------
-# If you'd like, I can also:
-# - Create a ready-to-push GitHub repo with this app + requirements.txt
-# - Add persistent storage (Google Sheets / Airtable / SQLite)
-# - Replace demo auth with real OAuth using streamlit-authenticator or similar
-# -----------------------------
