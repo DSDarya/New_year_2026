@@ -1,6 +1,7 @@
 import streamlit as st
 import random
 from streamlit.components.v1 import html
+import json
 
 # --- CONFIG ---
 st.set_page_config(page_title="Тайный Санта", page_icon="🎅", layout="centered")
@@ -11,18 +12,49 @@ DEFAULT_PARTICIPANTS = [
     "Рома", "Настя", "Вика", "Алексей", "Даниил", "Инна"
 ]
 
+# --- PERSISTENT STORAGE FUNCTIONS ---
+def load_data():
+    """Загружает данные из session_state или создает новые"""
+    if "santa_data" not in st.session_state:
+        st.session_state.santa_data = {
+            "remaining": DEFAULT_PARTICIPANTS.copy(),
+            "assigned": {},
+            "used_tokens": set()
+        }
+    return st.session_state.santa_data
+
+def save_data():
+    """Сохраняет данные в session_state"""
+    # Данные автоматически сохраняются в st.session_state
+    pass
+
+def reset_game():
+    """Сбрасывает игру к начальному состоянию"""
+    st.session_state.santa_data = {
+        "remaining": DEFAULT_PARTICIPANTS.copy(),
+        "assigned": {},
+        "used_tokens": set()
+    }
+    st.session_state.current_user = None
+    st.rerun()
+
 # --- SESSION STATE INIT ---
 def init_state():
-    if "remaining" not in st.session_state:
-        st.session_state.remaining = DEFAULT_PARTICIPANTS.copy()
-    if "assigned" not in st.session_state:
-        st.session_state.assigned = {}
     if "current_user" not in st.session_state:
         st.session_state.current_user = None
     if "auth_mode" not in st.session_state:
         st.session_state.auth_mode = "Simple select"
+    
+    # Загружаем основные данные
+    load_data()
 
 init_state()
+
+# Получаем ссылки на данные
+santa_data = st.session_state.santa_data
+remaining = santa_data["remaining"]
+assigned = santa_data["assigned"]
+used_tokens = santa_data["used_tokens"]
 
 # --- SNOW ANIMATION (injected via an HTML canvas) ---
 SNOW_HTML = r"""
@@ -121,9 +153,29 @@ with col2:
     **Как работает**
     - Вы выбираете своё имя в форме авторизации.
     - Нажимаете кнопку — и вам случайно выдаётся получатель.
+    - Каждый участник может выбрать имя только один раз!
+    - Каждое имя может быть выбрано только один раз!
     """)
 
 st.markdown("---")
+
+# --- ADMIN SECTION ---
+with st.expander("Администрирование (для организатора)"):
+    st.write("**Текущее состояние:**")
+    st.write(f"Осталось участников: {len(remaining)}")
+    st.write(f"Уже выбрали: {len(assigned)}")
+    
+    if st.button("🔄 Сбросить игру", type="secondary"):
+        reset_game()
+        st.success("Игра сброшена!")
+    
+    if st.button("📊 Показать все назначения", type="secondary"):
+        if assigned:
+            st.write("**Все назначения:**")
+            for santa, recipient in assigned.items():
+                st.write(f"🎅 {santa} → 🎁 {recipient}")
+        else:
+            st.info("Назначений пока нет")
 
 # --- AUTH MODE ---
 st.markdown("### Вариант авторизации")
@@ -131,30 +183,53 @@ st.session_state.auth_mode = st.selectbox("Выберите способ авт�
 
 # --- AUTH FORM ---
 st.markdown("### Авторизация")
+current_user = None
+
 if st.session_state.auth_mode == "Simple select":
-    user = st.selectbox("Кто вы?", ["Выберите..."] + DEFAULT_PARTICIPANTS)
+    # Показываем только тех, кто еще не выбрал
+    available_users = [p for p in DEFAULT_PARTICIPANTS if p not in assigned]
+    options = ["Выберите..."] + available_users
+    
+    user = st.selectbox("Кто вы?", options)
     if user != "Выберите...":
         st.session_state.current_user = user
+        current_user = user
 
 elif st.session_state.auth_mode == "Secret code (demo)":
     st.info("Режим демонстрации: введите ваше имя и секретный код. Код не проверяется — это пример UX.")
     user_input = st.text_input("Ваше имя")
     code = st.text_input("Секретный код")
-    if st.button("Войти" , key="login_code"):
+    if st.button("Войти", key="login_code"):
         if user_input and code:
-            st.session_state.current_user = user_input
-            st.success("Вход выполнен (демо)")
+            if user_input in assigned:
+                st.error("Этот пользователь уже выбрал получателя!")
+            else:
+                st.session_state.current_user = user_input
+                current_user = user_input
+                st.success("Вход выполнен (демо)")
         else:
             st.error("Введите имя и код")
 
-else:
+else:  # One-time token
     st.info("Режим демонстрации: одноразовый токен имитируется генерацией случайного токена")
+    
+    # Генерация уникального токена
+    if 'generated_token' not in st.session_state:
+        st.session_state.generated_token = f"token_{random.randint(1000, 9999)}"
+    
+    st.code(f"Ваш демо-токен: {st.session_state.generated_token}", language="text")
+    st.caption("Скопируйте этот токен для входа (демо-режим)")
+    
     display_token = st.text_input("Введите ваш одноразовый токен")
     if st.button("Войти", key="login_token"):
         if display_token:
-            # In demo we accept any token
-            st.session_state.current_user = "(токен) " + display_token
-            st.success("Вход выполнен (демо)")
+            if display_token in used_tokens:
+                st.error("Этот токен уже использован!")
+            else:
+                used_tokens.add(display_token)
+                st.session_state.current_user = f"Пользователь_{display_token}"
+                current_user = st.session_state.current_user
+                st.success("Вход выполнен (демо)")
         else:
             st.error("Требуется токен")
 
@@ -167,34 +242,56 @@ if st.session_state.current_user:
 
     col_a, col_b = st.columns([2,1])
     with col_a:
-        st.markdown("Вы можете получить имя вашего получателя один раз. После выдачи это имя удаляется из общего пула.")
+        st.markdown("Вы можете получить имя вашего получателя **только один раз**. После выдачи это имя удаляется из общего пуала.")
     with col_b:
-        st.markdown(f"**Осталось участников:** {len(st.session_state.remaining)}")
+        st.markdown(f"**Осталось участников:** {len(remaining)}")
 
-    if st.button("Получить имя получателя 🎁"):
-        if user in st.session_state.assigned:
-            st.warning("Вы уже получили имя! 🎄")
-        else:
-            # Ensure the pool is up-to-date: initialize from defaults minus already assigned recipients
-            # (use this to be robust if participants list was edited)
-            pool = [p for p in st.session_state.remaining if p != user]
-            if not pool:
-                st.error("К сожалению, доступных имён не осталось.")
+    # Проверяем, не выбрал ли уже этот пользователь
+    if user in assigned:
+        st.warning("⚠️ Вы уже получили имя получателя!")
+        st.success(f"Ваш получатель: **{assigned[user]}** 🎁✨")
+        st.info("Если вы забыли имя получателя, оно показано выше.")
+        
+    else:
+        if st.button("🎯 Получить имя получателя 🎁", type="primary"):
+            if not remaining:
+                st.error("К сожалению, все имена уже разобраны!")
             else:
-                chosen = random.choice(pool)
-                st.session_state.assigned[user] = chosen
-                # Remove from remaining so nobody else can get it
-                st.session_state.remaining.remove(chosen)
-                st.success("Имя успешно выдано! Перезагрузите страницу, чтобы скрыть ответ (при желании).")
+                # Исключаем текущего пользователя из возможных получателей
+                pool = [p for p in remaining if p != user]
+                
+                if not pool:
+                    st.error("К сожалению, для вас нет доступных получателей.")
+                else:
+                    chosen = random.choice(pool)
+                    assigned[user] = chosen
+                    remaining.remove(chosen)
+                    save_data()
+                    
+                    st.balloons()
+                    st.success(f"🎉 Ваш получатель: **{chosen}** 🎁✨")
+                    st.info("Запишите или запомните это имя! После обновления страницы вы сможете снова его посмотреть.")
 
-    if user in st.session_state.assigned:
+    # Всегда показываем текущее назначение, если оно есть
+    if user in assigned:
         st.markdown("---")
-        st.success(f"Ваш получатель: **{st.session_state.assigned[user]}** 🎁✨")
-
-    # Optional: show small hint
+        st.markdown(f"### 🎁 Ваш получатель: **{assigned[user]}**")
+        st.caption("Это имя сохранится даже после обновления страницы")
 
 else:
-    st.info("Пожалуйста, авторизуйтесь, чтобы получить имя получателя.")
+    st.info("👆 Пожалуйста, авторизуйтесь, чтобы получить имя получателя.")
 
 st.markdown("---")
 
+# --- STATUS INFO ---
+st.markdown("### 📊 Статус игры")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Всего участников", len(DEFAULT_PARTICIPANTS))
+with col2:
+    st.metric("Уже выбрали", len(assigned))
+with col3:
+    st.metric("Осталось", len(remaining))
+
+if not remaining and assigned:
+    st.success("🎄 Все участники получили своих получателей! Тайный Санта завершен!")
