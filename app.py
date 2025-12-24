@@ -3,6 +3,30 @@ import random
 from streamlit.components.v1 import html
 import hashlib
 import time
+from datetime import datetime
+from supabase import create_client, Client  # Импортируем Supabase клиент[citation:1]
+
+# --- SUPABASE CONFIG ---
+# Инициализация подключения к Supabase[citation:1]
+@st.cache_resource
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
+
+# Функция для создания таблицы в Supabase
+def create_supabase_table():
+    # Создаем таблицу, если она не существует
+    try:
+        supabase.table("santa_game").select("count", count="exact").limit(1).execute()
+    except Exception as e:
+        # Если таблицы нет, создаем её через SQL
+        st.warning("Таблица santa_game не найдена. Создайте её через SQL Editor в Supabase с полями: id, game_state, assignments, participants, used_tokens, last_updated")
+        
+# Вызываем создание таблицы при запуске
+create_supabase_table()
 
 # --- CONFIG ---
 st.set_page_config(page_title="Тайный Санта", page_icon="🎅", layout="centered")
@@ -16,50 +40,89 @@ DEFAULT_PARTICIPANTS = [
 # --- ADMIN CONFIG ---
 ADMIN_USER = "Даша К"  # Единственный пользователь с доступом к админке
 
-# --- PERSISTENT STORAGE FUNCTIONS ---
-def initialize_session_state():
-    """Инициализирует все необходимые переменные в session_state"""
-    if "initialized" not in st.session_state:
-        st.session_state.initialized = True
-        st.session_state.santa_data = {
-            "remaining": DEFAULT_PARTICIPANTS.copy(),
-            "assigned": {},
-            "used_tokens": set(),
-            "game_started": False
+# --- SUPABASE PERSISTENT STORAGE FUNCTIONS ---
+def initialize_game_state():
+    """Инициализирует состояние игры в Supabase"""
+    # Проверяем, есть ли уже запись в базе
+    response = supabase.table("santa_game").select("*").eq("id", 1).execute()
+    
+    if not response.data:
+        # Создаем начальное состояние
+        initial_state = {
+            "id": 1,
+            "game_state": {
+                "remaining": DEFAULT_PARTICIPANTS.copy(),
+                "assigned": {},
+                "used_tokens": [],
+                "game_started": False
+            },
+            "assignments": {},
+            "participants": DEFAULT_PARTICIPANTS.copy(),
+            "used_tokens": [],
+            "last_updated": datetime.now().isoformat()
         }
-        st.session_state.current_user = None
-        st.session_state.auth_mode = "Simple select"
-        st.session_state.generated_token = f"token_{random.randint(1000, 9999)}"
+        supabase.table("santa_game").insert(initial_state).execute()
+        return initial_state["game_state"]
+    else:
+        return response.data[0]["game_state"]
 
 def get_santa_data():
-    """Безопасно получает данные игры"""
-    initialize_session_state()
-    return st.session_state.santa_data
+    """Безопасно получает данные игры из Supabase"""
+    try:
+        response = supabase.table("santa_game").select("*").eq("id", 1).execute()
+        if response.data:
+            return response.data[0]["game_state"]
+    except Exception as e:
+        st.error(f"Ошибка загрузки данных: {e}")
+    
+    # Если не удалось загрузить, инициализируем заново
+    return initialize_game_state()
 
-def save_santa_data():
-    """Сохраняет данные (в Streamlit это происходит автоматически)"""
-    pass
+def save_santa_data(game_state):
+    """Сохраняет данные игры в Supabase"""
+    try:
+        data_to_save = {
+            "game_state": game_state,
+            "last_updated": datetime.now().isoformat()
+        }
+        # Обновляем только game_state и last_updated
+        supabase.table("santa_game").update(data_to_save).eq("id", 1).execute()
+        return True
+    except Exception as e:
+        st.error(f"Ошибка сохранения: {e}")
+        return False
 
-def reset_game():
-    """Сбрасывает игру к начальному состоянию"""
-    st.session_state.santa_data = {
-        "remaining": DEFAULT_PARTICIPANTS.copy(),
-        "assigned": {},
-        "used_tokens": set(),
-        "game_started": True
+def reset_game_in_supabase():
+    """Сбрасывает игру к начальному состоянию в Supabase"""
+    reset_state = {
+        "game_state": {
+            "remaining": DEFAULT_PARTICIPANTS.copy(),
+            "assigned": {},
+            "used_tokens": [],
+            "game_started": True
+        },
+        "assignments": {},
+        "last_updated": datetime.now().isoformat()
     }
-    st.session_state.current_user = None
-    st.rerun()
+    supabase.table("santa_game").update(reset_state).eq("id", 1).execute()
+    return reset_state["game_state"]
 
-# Инициализируем состояние при загрузке
-initialize_session_state()
-
-# Получаем ссылки на данные
+# Загружаем данные при старте
 santa_data = get_santa_data()
 remaining = santa_data["remaining"]
 assigned = santa_data["assigned"]
-used_tokens = santa_data["used_tokens"]
+used_tokens = set(santa_data["used_tokens"])  # Конвертируем список в множество
 game_started = santa_data["game_started"]
+
+# Инициализируем session_state
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+if "auth_mode" not in st.session_state:
+    st.session_state.auth_mode = "Simple select"
+if "generated_token" not in st.session_state:
+    st.session_state.generated_token = f"token_{random.randint(1000, 9999)}"
+if "initialized" not in st.session_state:
+    st.session_state.initialized = True
 
 # --- SNOW ANIMATION ---
 SNOW_HTML = r"""
@@ -140,6 +203,7 @@ st.markdown(
       .btn { background: linear-gradient(90deg,#ff9a9e,#fad0c4); border: none; padding: 10px 18px; border-radius: 12px; }
       .admin-section { border: 2px solid #ff6b6b; border-radius: 10px; padding: 15px; background: rgba(255, 107, 107, 0.1); }
       .warning-box { border: 2px solid #ffcc00; border-radius: 10px; padding: 15px; background: rgba(255, 204, 0, 0.1); }
+      .supabase-status { border: 2px solid #3ecf8e; border-radius: 10px; padding: 15px; background: rgba(62, 207, 142, 0.1); }
     </style>
     """,
     unsafe_allow_html=True
@@ -162,8 +226,24 @@ with col2:
     - Нажимаете кнопку — и вам случайно выдаётся получатель.
     - Каждый участник может выбрать имя только один раз!
     - Каждое имя может быть выбрано только один раз!
-    - **Данные сохраняются при обновлении страницы**
+    - **Данные сохраняются в базе Supabase и не теряются при обновлении**
     """)
+
+st.markdown("---")
+
+# --- SUPABASE STATUS ---
+st.markdown('<div class="supabase-status">', unsafe_allow_html=True)
+st.markdown("### 🗄️ Состояние базы данных")
+try:
+    response = supabase.table("santa_game").select("last_updated").eq("id", 1).execute()
+    if response.data:
+        last_updated = response.data[0]["last_updated"]
+        st.success(f"✓ База данных подключена. Последнее обновление: {last_updated}")
+    else:
+        st.info("База данных инициализирована, но записей ещё нет.")
+except Exception as e:
+    st.error(f"✗ Ошибка подключения к базе: {e}")
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -181,8 +261,9 @@ def show_admin_section():
     
     with col1:
         if st.button("🔄 Полный сброс игры", type="secondary", use_container_width=True):
-            reset_game()
-            st.success("Игра полностью сброшена!")
+            reset_game_in_supabase()
+            st.success("Игра полностью сброшена в базе данных!")
+            st.rerun()
     
     with col2:
         if st.button("📊 Показать все назначения", type="secondary", use_container_width=True):
@@ -281,6 +362,9 @@ else:  # One-time token
                 st.error("Этот токен уже использован!")
             else:
                 used_tokens.add(display_token)
+                # Обновляем данные в Supabase
+                santa_data["used_tokens"] = list(used_tokens)
+                save_santa_data(santa_data)
                 st.session_state.current_user = f"Пользователь_{display_token}"
                 st.success("Вход выполнен (демо)")
                 st.rerun()
@@ -307,7 +391,7 @@ if st.session_state.current_user:
     if user in assigned:
         st.warning("⚠️ Вы уже получили имя получателя!")
         st.success(f"Ваш получатель: **{assigned[user]}** 🎁✨")
-        st.info("Это назначение сохранится даже после обновления страницы.")
+        st.info("Это назначение сохранится в базе данных даже после обновления страницы.")
         
         # Секретный админ доступ для Даши К
         if is_admin:
@@ -331,12 +415,17 @@ if st.session_state.current_user:
                     assigned[user] = chosen
                     remaining.remove(chosen)
                     santa_data["game_started"] = True
-                    save_santa_data()
+                    santa_data["assigned"] = assigned
+                    santa_data["remaining"] = remaining
                     
-                    st.balloons()
-                    st.success(f"🎉 Ваш получатель: **{chosen}** 🎁✨")
-                    st.info("Запишите или запомните это имя! Оно сохранится даже после обновления страницы.")
-                    st.rerun()
+                    # Сохраняем в Supabase
+                    if save_santa_data(santa_data):
+                        st.balloons()
+                        st.success(f"🎉 Ваш получатель: **{chosen}** 🎁✨")
+                        st.info("Запишите или запомните это имя! Оно сохранено в базе данных.")
+                        st.rerun()
+                    else:
+                        st.error("Ошибка сохранения данных. Попробуйте еще раз.")
 
 else:
     st.info("👆 Пожалуйста, авторизуйтесь, чтобы получить имя получателя.")
@@ -356,18 +445,22 @@ with col3:
 if not remaining and assigned:
     st.success("🎄 Все участники получили своих получателей! Тайный Санта завершен!")
 
-# --- PERSISTENCE WARNING ---
-if not game_started and len(assigned) == 0:
-    st.markdown("---")
-    st.markdown('<div class="warning-box">', unsafe_allow_html=True)
-    st.markdown("**💡 Важно:** Данные сохраняются в течение сессии. При полном закрытии браузера игра сбросится.")
-    st.markdown("Организатор может в любой момент сбросить игру через панель администрирования.")
-    st.markdown('</div>', unsafe_allow_html=True)
+# --- PERSISTENCE INFO ---
+st.markdown("---")
+st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+st.markdown("**💡 Важно:** Данные теперь сохраняются в базе Supabase и не теряются при перезагрузке страницы или закрытии браузера.")
+st.markdown("Организатор может в любой момент сбросить игру через панель администрирования.")
+st.markdown('</div>', unsafe_allow_html=True)
 
 # --- DEBUG INFO (только для админа) ---
 if is_admin and st.checkbox("Показать отладочную информацию", key="debug_info"):
     st.markdown("---")
     st.markdown("### 🐛 Отладочная информация")
     st.write("Session state keys:", list(st.session_state.keys()))
-    st.write("Santa data:", santa_data)
+    st.write("Santa data from Supabase:", santa_data)
     st.write("Current user:", st.session_state.current_user)
+    try:
+        db_data = supabase.table("santa_game").select("*").eq("id", 1).execute()
+        st.write("Полные данные из Supabase:", db_data.data[0] if db_data.data else "Нет данных")
+    except Exception as e:
+        st.write(f"Ошибка получения данных из Supabase: {e}")
